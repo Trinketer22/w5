@@ -1522,36 +1522,52 @@ describe('Wallet v5 external tests', () => {
                 assertInternal(res.transactions, owner.address, 0);
                 expect(await wallet.getSeqno()).toEqual(seqNo + 1);
             });
-            it('should ignore internal message with correct prefix, but incorrect length', async () => {
+            it('should ignore message if length less than required for signature check', async () => {
                 const seqNo = await wallet.getSeqno();
-                // So we have message with bad wallet id
+                // So we have unsigned message
                 const badMsg = WalletV5Test.requestMessage(
                     true,
-                    walletId - 1n,
+                    walletId,
                     curTime() + 1000,
                     BigInt(seqNo),
-                    {},
-                    keys.secretKey
+                    {}
                 );
 
-                // Now we have it's truncated version
-                const msgTrunc = beginCell()
-                    .storeBits(badMsg.beginParse().loadBits(badMsg.bits.length - 10))
-                    .endCell(); // off by one
+                const ds = badMsg.beginParse();
+                // action bits preceeding signature
+                // It's malformed, yet it is possible to check signature
+                const offByTwo = beginCell()
+                    .storeBits(ds.preloadBits(badMsg.bits.length - 2))
+                    .endCell();
+                // This however means that error is in the main body wallet_id, seqno, valid_untill
+                // So this should be ignored
+                // However, in a perfect world prefix + signature length should be the only requirement
+                const offByThree = beginCell()
+                    .storeBits(ds.preloadBits(badMsg.bits.length - 3))
+                    .endCell();
 
                 let res = await wallet.sendInternalSignedMessage(owner.getSender(), {
                     value: toNano('1'),
-                    body: msgTrunc
+                    body: WalletV5Test.signRequestMessage(offByTwo, keys.secretKey)
                 });
-                // Now, because it's truncated it gets ignored
-                assertInternal(res.transactions, owner.address, 0);
-
+                // Should fail and bounce
+                expect(res.transactions).toHaveTransaction({
+                    on: wallet.address,
+                    op: Opcodes.auth_signed_internal,
+                    aborted: true,
+                    outMessagesCount: 1
+                });
                 res = await wallet.sendInternalSignedMessage(owner.getSender(), {
                     value: toNano('1'),
-                    body: badMsg
+                    body: WalletV5Test.signRequestMessage(offByThree, keys.secretKey)
                 });
-                assertInternal(res.transactions, owner.address, ErrorsV5.invalid_wallet_id);
-                // If we send it as is, the subwallet exception will trigger
+                // Goes into sand now
+                expect(res.transactions).toHaveTransaction({
+                    on: wallet.address,
+                    op: Opcodes.auth_signed_internal,
+                    aborted: false,
+                    outMessagesCount: 0
+                });
             });
             it('should be able to send up to 255 messages', async () => {
                 let testMsgs: MessageOut[] = new Array(255);
