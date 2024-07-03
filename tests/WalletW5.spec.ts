@@ -39,6 +39,7 @@ import {
     ExtensionAdd,
     ExtensionRemove
 } from '../wrappers/wallet-v5-test';
+import { MsgGenerator } from './MsgGenerator';
 
 describe('Wallet v5 external tests', () => {
     let blockchain: Blockchain;
@@ -2951,6 +2952,50 @@ describe('Wallet v5 external tests', () => {
                 value: toNano('10')
             });
             expect(await badWallet.getSeqno()).toEqual(++seqNo);
+        });
+    });
+    describe('TVM tests', () => {
+        it('Action phase should not fail on invalid content with mode = 2', async () => {
+            let seqNo = await wallet.getSeqno();
+            const badMsgGenerator = new MsgGenerator(0);
+
+            let buildSendMsg = (msg: Cell, mode: number) => {
+                return beginCell()
+                    .storeUint(Opcodes.action_send_msg, 32)
+                    .storeUint(mode, 8)
+                    .storeRef(msg)
+                    .endCell();
+            };
+            const listTail = beginCell().endCell();
+            for (let testMode of [0, 16]) {
+                for (let msg of badMsgGenerator.generateBadMsg()) {
+                    const actionList = beginCell()
+                        .storeSlice(buildSendMsg(msg, SendMode.IGNORE_ERRORS | testMode).asSlice())
+                        .storeRef(listTail)
+                        .endCell();
+                    const reqMsg = WalletV5Test.requestMessage(
+                        false,
+                        walletId,
+                        curTime() + 100,
+                        seqNo,
+                        {
+                            wallet: actionList
+                        },
+                        keys.secretKey
+                    );
+
+                    const res = await wallet.sendExternalSignedMessage(reqMsg);
+
+                    expect(res.transactions).toHaveTransaction({
+                        on: wallet.address,
+                        op: Opcodes.auth_signed,
+                        outMessagesCount: 0,
+                        actionResultCode: 0,
+                        aborted: false
+                    });
+                    expect(await wallet.getSeqno()).toEqual(++seqNo);
+                }
+            }
         });
     });
 });
