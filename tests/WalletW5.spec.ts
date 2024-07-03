@@ -2955,6 +2955,24 @@ describe('Wallet v5 external tests', () => {
         });
     });
     describe('TVM tests', () => {
+        beforeAll(async () => {
+            const config = Dictionary.loadDirect(
+                Dictionary.Keys.Int(32),
+                Dictionary.Values.Cell(),
+                blockchain.config
+            );
+            const param8 = config.get(8)!.beginParse();
+            const tag = param8.loadUint(8);
+            const curVersion = param8.loadUint(32);
+            if (curVersion != 0) {
+                console.log(`Version ${curVersion} forcing version 8`);
+                config.set(
+                    8,
+                    beginCell().storeUint(tag, 8).storeUint(8, 32).storeSlice(param8).endCell()
+                );
+                blockchain.setConfig(beginCell().storeDictDirect(config).endCell());
+            }
+        });
         it('Action phase should not fail on invalid content with mode = 2', async () => {
             let seqNo = await wallet.getSeqno();
             const badMsgGenerator = new MsgGenerator(0);
@@ -2970,8 +2988,8 @@ describe('Wallet v5 external tests', () => {
             for (let testMode of [0, 16]) {
                 for (let msg of badMsgGenerator.generateBadMsg()) {
                     const actionList = beginCell()
-                        .storeSlice(buildSendMsg(msg, SendMode.IGNORE_ERRORS | testMode).asSlice())
                         .storeRef(listTail)
+                        .storeSlice(buildSendMsg(msg, testMode | SendMode.IGNORE_ERRORS).asSlice())
                         .endCell();
                     const reqMsg = WalletV5Test.requestMessage(
                         false,
