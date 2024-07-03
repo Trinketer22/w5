@@ -2964,7 +2964,7 @@ describe('Wallet v5 external tests', () => {
             const param8 = config.get(8)!.beginParse();
             const tag = param8.loadUint(8);
             const curVersion = param8.loadUint(32);
-            if (curVersion != 0) {
+            if (curVersion != 8) {
                 console.log(`Version ${curVersion} forcing version 8`);
                 config.set(
                     8,
