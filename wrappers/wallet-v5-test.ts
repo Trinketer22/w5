@@ -31,7 +31,6 @@ export type MessageOut = {
 function storeWalletActions(actions: WalletActions) {
     // store compatable
     return (builder: Builder) => {
-        let hasExtendedActions = false;
         if(actions.wallet) {
             let actionCell: Cell | null = null;
             if(actions.wallet instanceof Cell) {

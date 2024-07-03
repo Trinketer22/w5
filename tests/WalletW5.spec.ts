@@ -22,7 +22,6 @@ import {
     EmulationError,
     SandboxContract,
     SendMessageResult,
-    internal,
     TreasuryContract
 } from '@ton/sandbox';
 import { KeyPair, getSecureRandomBytes, keyPairFromSeed } from '@ton/crypto';
@@ -1265,7 +1264,7 @@ describe('Wallet v5 external tests', () => {
                     {},
                     keys.secretKey
                 );
-                const res = await wallet.sendExternalSignedMessage(testMsg);
+                await wallet.sendExternalSignedMessage(testMsg);
 
                 expect(await wallet.getSeqno()).toEqual(seqNo + 1);
             });
@@ -1295,7 +1294,7 @@ describe('Wallet v5 external tests', () => {
                 const randomBody = beginCell().storeUint(curTime(), 64).endCell();
                 const seqNo = BigInt(await wallet.getSeqno());
 
-                const res = await assertSendMessages(
+                await assertSendMessages(
                     0,
                     walletId,
                     curTime() + 1000,
@@ -2152,14 +2151,6 @@ describe('Wallet v5 external tests', () => {
                         if (!Address.isAddress(args.extra.new_address)) {
                             throw new TypeError('Callback requires wallet address');
                         }
-                        const reqMsg = WalletV5Test.requestMessage(
-                            true,
-                            args.walletId,
-                            args.valid_until,
-                            args.seqno,
-                            args.actions,
-                            args.key
-                        );
                         const res = await wallet.sendExtensionActions(
                             testExtensionBc.getSender(),
                             args.actions
@@ -2592,7 +2583,6 @@ describe('Wallet v5 external tests', () => {
         });
     });
     describe('Signature auth', () => {
-        type OwnerArguments = { walletId: bigint; seqno: number | bigint; key: Buffer };
         let signatureDisabled: BlockchainSnapshot;
         let signatureEnabled: BlockchainSnapshot;
         let multipleExtensions: BlockchainSnapshot;
@@ -2775,7 +2765,6 @@ describe('Wallet v5 external tests', () => {
         it('extension should be able to add another extension when sig auth is disabled', async () => {
             await loadFrom(signatureDisabled);
             const testExtAddr = randomAddress();
-            const stateBefore = await getWalletData();
             const extBefore = await wallet.getExtensionsArray();
             expect(extBefore.length).toBe(1);
 
