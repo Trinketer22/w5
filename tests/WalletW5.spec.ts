@@ -2871,5 +2871,86 @@ describe('Wallet v5 external tests', () => {
 
             expect(await getWalletData()).toEqualCell(stateBefore);
         });
+        it('should be able to withdraw funds on deploy with sig auth disabled', async () => {
+            let newWalletId: bigint;
+
+            do {
+                newWalletId = BigInt(getRandomInt(0, 10000));
+            } while (newWalletId == walletId);
+
+            let seqNo = 0;
+            const badWallet = blockchain.openContract(
+                WalletV5Test.createFromConfig(
+                    {
+                        walletId: newWalletId,
+                        seqno: seqNo,
+                        publicKey: keys.publicKey,
+                        signatureAllowed: false, // That's what we're testing. That's pretty much an incorrect deployment
+                        extensions: Dictionary.empty() // If one supplies non empty dictionary here, you're cooked.
+                    },
+                    code
+                )
+            );
+
+            let res = await badWallet.sendDeploy(owner.getSender(), toNano('100'));
+            expect(res.transactions).toHaveTransaction({
+                on: badWallet.address,
+                aborted: false,
+                deploy: true
+            });
+            // Normally that would lock funds, because owner can only auth himself via signatur
+
+            const sendOut: MessageOut[] = [
+                {
+                    message: internal_relaxed({
+                        to: owner.address,
+                        value: toNano('10')
+                    }),
+                    mode: SendMode.PAY_GAS_SEPARATELY | SendMode.IGNORE_ERRORS
+                }
+            ];
+
+            res = await badWallet.sendMessagesInternal(
+                owner.getSender(),
+                newWalletId,
+                curTime() + 100,
+                seqNo,
+                keys.secretKey,
+                sendOut
+            );
+            expect(res.transactions).toHaveTransaction({
+                on: badWallet.address,
+                op: Opcodes.auth_signed_internal,
+                aborted: false,
+                outMessagesCount: 1
+            });
+            expect(res.transactions).toHaveTransaction({
+                on: owner.address,
+                from: badWallet.address,
+                value: toNano('10')
+            });
+            expect(await badWallet.getSeqno()).toEqual(++seqNo);
+
+            res = await badWallet.sendMessagesExternal(
+                newWalletId,
+                curTime() + 100,
+                seqNo,
+                keys.secretKey,
+                sendOut
+            );
+
+            expect(res.transactions).toHaveTransaction({
+                on: badWallet.address,
+                op: Opcodes.auth_signed,
+                aborted: false,
+                outMessagesCount: 1
+            });
+            expect(res.transactions).toHaveTransaction({
+                on: owner.address,
+                from: badWallet.address,
+                value: toNano('10')
+            });
+            expect(await badWallet.getSeqno()).toEqual(++seqNo);
+        });
     });
 });
