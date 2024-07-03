@@ -1255,7 +1255,7 @@ describe('Wallet v5 external tests', () => {
                 });
             });
             // Doesn't make much sense, since inderectly tested in too many places
-            it.skip('empty action list should increase seqno', async () => {
+            it('empty action list should increase seqno', async () => {
                 const seqNo = await wallet.getSeqno();
                 const testMsg = WalletV5Test.requestMessage(
                     false,
