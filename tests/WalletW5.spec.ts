@@ -29,7 +29,7 @@ import { KeyPair, getSecureRandomBytes, keyPairFromSeed } from '@ton/crypto';
 import { Opcodes, walletV5ConfigToCell } from '../wrappers/wallet-v5';
 import { bufferToBigInt, getRandomInt, pickRandomNFrom } from './utils';
 import { findTransactionRequired, randomAddress } from '@ton/test-utils';
-import { estimateMessageImpact, getMsgPrices, MsgPrices, storageGeneric } from './gasUtils';
+import { collectCellStats, computedGeneric, estimateMessageImpact, getMsgPrices, MsgPrices, storageGeneric } from './gasUtils';
 import { ErrorsV5 } from '../wrappers/Errors';
 import {
     WalletV5Test,
@@ -131,6 +131,11 @@ describe('Wallet v5 external tests', () => {
     beforeAll(async () => {
         blockchain = await Blockchain.create();
         code = await compile('wallet_v5');
+        let codeStats = collectCellStats(code, [], false);
+        console.log(`Deduplicated code stats: ${codeStats.bits} bits ${codeStats.cells} cells`);
+
+        codeStats = collectCellStats(code, [], false, true);
+        console.log(`Raw code stats: ${codeStats.bits} bits ${codeStats.cells} cells`);
         keys = keyPairFromSeed(await getSecureRandomBytes(32));
 
         owner = await blockchain.treasury('wallet_owner');
@@ -798,7 +803,7 @@ describe('Wallet v5 external tests', () => {
                 const randomBody = beginCell().storeUint(curTime(), 64).endCell();
                 const seqNo = BigInt(await wallet.getSeqno());
 
-                await assertSendMessages(
+                const res = await assertSendMessages(
                     0,
                     walletId,
                     curTime() + 1000,
@@ -823,6 +828,15 @@ describe('Wallet v5 external tests', () => {
                     ],
                     keys.secretKey
                 );
+
+                const extTx = findTransactionRequired(res.transactions, {
+                    on: wallet.address,
+                    aborted: false,
+                    outMessagesCount: 2,
+                });
+
+                const computed = computedGeneric(extTx);
+                console.log(`Signed external processing took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
 
                 const seqnoAfter = BigInt(await wallet.getSeqno());
                 expect(seqnoAfter).toEqual(seqNo + 1n);
@@ -912,7 +926,7 @@ describe('Wallet v5 external tests', () => {
                     };
                 }
 
-                await assertSendMessages(
+                const res = await assertSendMessages(
                     0,
                     walletId,
                     curTime() + 1000,
@@ -920,6 +934,9 @@ describe('Wallet v5 external tests', () => {
                     testMsgs,
                     keys.secretKey
                 );
+
+                const computed = computedGeneric(res.transactions[0]);
+                console.log(`Signed external 255 messages processing took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
             });
             it('should be able to send messages with different send modes', async () => {
                 await testSendModes(false, 0, SendMode.IGNORE_ERRORS, [
@@ -1150,6 +1167,9 @@ describe('Wallet v5 external tests', () => {
                         exitCode: 0 // Because of commit we can't rely on compute phase status
                     });
                     expect(await wallet.getSeqno()).toEqual(Number(args.seqno) + 1);
+
+                    const computed = computedGeneric(res.transactions[0]);
+                    console.log(`Signed external "add extension" took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
                 });
 
                 hasExtension = blockchain.snapshot();
@@ -1232,6 +1252,9 @@ describe('Wallet v5 external tests', () => {
                         outMessagesCount: 0,
                         exitCode: 0 // Because of commit we can't rely on compute phase status
                     });
+
+                    const computed = computedGeneric(res.transactions[0]);
+                    console.log(`Signed external "remove extension" took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
                 });
             });
             it('should throw on removing non-existent extension', async () => {
@@ -1286,6 +1309,11 @@ describe('Wallet v5 external tests', () => {
                         outMessagesCount: 255
                     });
                     expect(await wallet.getSeqno()).toEqual(Number(args.seqno) + 1);
+
+                    // const computed = computedGeneric(res.transactions[0]);
+                    // console.log(`Signed external "add_remove_send" took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
+                    // Doesn't make much sense, since each of those operations measured individually
+
                 });
             });
         });
@@ -1324,6 +1352,16 @@ describe('Wallet v5 external tests', () => {
 
                 const seqnoAfter = BigInt(await wallet.getSeqno());
                 expect(seqnoAfter).toEqual(seqNo + 1n);
+
+                // Transaction 1 because ext 0-> treasury_wallet 1->w5
+                const computed = computedGeneric(findTransactionRequired(res.transactions, {
+                    on: wallet.address,
+                    op: Opcodes.auth_signed_internal,
+                    aborted: false,
+                    outMessagesCount: 2
+                }));
+
+                console.log(`Signed internal processing took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
             });
             it('should ignore message with wrong signature', async () => {
                 const seqNo = await wallet.getSeqno();
@@ -1568,7 +1606,7 @@ describe('Wallet v5 external tests', () => {
                         mode: defaultExternalMode
                     };
                 }
-                await assertSendMessages(
+                const res = await assertSendMessages(
                     0,
                     walletId,
                     curTime() + 1000,
@@ -1577,6 +1615,15 @@ describe('Wallet v5 external tests', () => {
                     keys.secretKey,
                     owner.getSender()
                 );
+
+                const computed = computedGeneric(findTransactionRequired(res.transactions, {
+                    on: wallet.address,
+                    op: Opcodes.auth_signed_internal,
+                    aborted: false,
+                    outMessagesCount: 255
+                }));
+
+                console.log(`Signed internal 255 messages processing took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
             });
             it('should be able to send message with init state', async () => {
                 await testSendInit(
@@ -1748,15 +1795,18 @@ describe('Wallet v5 external tests', () => {
                         value: toNano('1'),
                         body: reqMsg
                     });
-                    expect(res.transactions).toHaveTransaction({
+                    const computed = computedGeneric(findTransactionRequired(res.transactions,{
                         on: wallet.address,
                         from: owner.address,
                         op: Opcodes.auth_signed_internal,
                         outMessagesCount: 0,
                         aborted: false,
                         exitCode: 0
-                    });
+                    }));
+
                     expect(await wallet.getSeqno()).toEqual(Number(args.seqno) + 1);
+
+                    console.log(`Signed internal "add_extension" took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
                 });
                 hasExtension = blockchain.snapshot();
             });
@@ -1850,13 +1900,15 @@ describe('Wallet v5 external tests', () => {
                         body: reqMsg
                     });
 
-                    expect(res.transactions).toHaveTransaction({
+                    const computed = computedGeneric(findTransactionRequired(res.transactions, {
                         on: wallet.address,
                         from: owner.address,
                         op: Opcodes.auth_signed_internal,
                         outMessagesCount: 0,
                         aborted: false
-                    });
+                    }));
+
+                    console.log(`Signed internal "remove_extension" took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
                 });
             });
             it('should throw on removing non-existent extension', async () => {
@@ -2026,7 +2078,7 @@ describe('Wallet v5 external tests', () => {
                 const msgValue = toNano(getRandomInt(1, 10));
                 const randomBody = beginCell().storeUint(curTime(), 64).endCell();
 
-                await assertSendMessages(
+                const res = await assertSendMessages(
                     0,
                     walletId,
                     curTime() + 1000,
@@ -2052,6 +2104,15 @@ describe('Wallet v5 external tests', () => {
                     keys.secretKey,
                     extensionSender
                 );
+
+                const computed = computedGeneric(findTransactionRequired(res.transactions, {
+                    on: wallet.address,
+                    op: Opcodes.auth_extension,
+                    aborted: false,
+                    outMessagesCount: 2
+                }));
+
+                console.log(`Processing send from extension took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
             });
             it('extension action is only allowed from installed extension address', async () => {
                 const differentExt = await blockchain.treasury('Not installed');
@@ -2126,7 +2187,7 @@ describe('Wallet v5 external tests', () => {
                         mode: defaultExternalMode
                     };
                 }
-                await assertSendMessages(
+                const res = await assertSendMessages(
                     0,
                     walletId,
                     curTime() + 1000,
@@ -2135,6 +2196,15 @@ describe('Wallet v5 external tests', () => {
                     keys.secretKey,
                     extensionSender
                 );
+
+                const computed = computedGeneric(findTransactionRequired(res.transactions, {
+                    on: wallet.address,
+                    op: Opcodes.auth_extension,
+                    aborted: false,
+                    outMessagesCount: 255
+                }));
+
+                console.log(`Processing 255 messages from extension took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
             });
             it('should be able to send messages with various send modes', async () => {
                 let modeSet = [
@@ -2298,14 +2368,18 @@ describe('Wallet v5 external tests', () => {
                         testExtensionBc.getSender(),
                         args.actions
                     );
-                    expect(res.transactions).toHaveTransaction({
+
+                    const computed = computedGeneric(findTransactionRequired(res.transactions,{
                         on: wallet.address,
                         from: testExtensionBc.address,
                         op: Opcodes.auth_extension,
                         outMessagesCount: 0,
                         aborted: false,
                         exitCode: 0
-                    });
+                    }));
+
+                    console.log(`Processing "add_extension" from extension took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
+
                 }, randomExtAddres);
             });
             it('should not be able to install already installed extendsion', async () => {
@@ -2387,13 +2461,15 @@ describe('Wallet v5 external tests', () => {
                         toNano('1')
                     );
 
-                    expect(res.transactions).toHaveTransaction({
+                    const computed = computedGeneric(findTransactionRequired(res.transactions, {
                         on: wallet.address,
                         from: testExtensionBc.address,
                         op: Opcodes.auth_extension,
                         outMessagesCount: 0,
                         aborted: false
-                    });
+                    }));
+
+                    console.log(`Processing "remove_extension" from extension took ${computed.gasUsed} gas executing ${computed.vmSteps} vmSteps`);
                 });
             });
             it('should throw on removing non-existent extension', async () => {
