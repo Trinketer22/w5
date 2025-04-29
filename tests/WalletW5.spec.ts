@@ -1574,7 +1574,8 @@ describe('Wallet v5 external tests', () => {
                     curTime() + 1000,
                     seqNo,
                     testMsgs,
-                    keys.secretKey
+                    keys.secretKey,
+                    owner.getSender()
                 );
             });
             it('should be able to send message with init state', async () => {

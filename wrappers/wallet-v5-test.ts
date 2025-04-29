@@ -164,7 +164,7 @@ export class WalletV5Test extends WalletV5 {
                                wallet_id: bigint,
                                valid_until: number,
                                seqno: bigint | number,
-                               key: Buffer, messages: MessageOut[], value: bigint = toNano('0.05')) {
+                               key: Buffer, messages: MessageOut[], value: bigint = toNano('1')) {
         
         const actions: OutActionSendMsg[] = messages.map(message2action);
         
