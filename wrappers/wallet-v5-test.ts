@@ -452,11 +452,11 @@ export class WalletV5Test {
         return result.stack.readNumber();
     }
 
-    async getWalletIdParsed(provider: ContractProvider) {
+    async getWalletIdParsed(provider: ContractProvider, networkId: -239 | -3 = -239) {
         const result = await provider.get('get_subwallet_id', []);
 
         const walletId = result.stack.readBigNumber();
-        return loadWalletIdV5R1(walletId, -239);
+        return loadWalletIdV5R1(walletId, networkId);
     }
 
     async getPublicKey(provider: ContractProvider) {
